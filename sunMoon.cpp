@@ -288,4 +288,3 @@ time_t suntime(time_t now, double lat, double lon, bool sunset, int tz) {
 	return ret;
 }
 
-
