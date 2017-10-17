@@ -5,9 +5,8 @@
 #include <ESP8266WebServer.h>
 #include <ArduinoOTA.h>
 #define LOG MySerial.println
-#include <ESP8266MQTTClient.h>
+#include "mqtt.h"
 #include <ESP8266WiFi.h>
-MQTTClient mqtt;
 
 #include <time.h>
 #include "filemgr.h"
@@ -18,6 +17,7 @@ MQTTClient mqtt;
 #ifndef ENABLE_PRINT
 // disable Serial output
 #define Serial MySerial
+MqttPublish mqtt;
 
 IPAddress syslogServer(192, 168, 1, 199);
 WiFiUDP udp;
@@ -108,8 +108,6 @@ public:
 ESP8266WebServer http_server(80);
 String webPage = "";
 String topic = "sensor/";
-#define MAX_SRV_CLIENTS 5
-WiFiClient serverClients[MAX_SRV_CLIENTS];
 unsigned long a=1;
 TimeEvent sunRise;
 TimeEvent sunSet;
@@ -136,31 +134,6 @@ void Syslog(String msgtosend)
   free(p);
 }
 
-void startmqtt()
-{
-    //topic, data, data is continuing
-  mqtt.onData([](String topic, String data, bool cont) {
-    Serial.printf("Data received, topic: %s, data: %s\r\n", topic.c_str(), data.c_str());
-    mqtt.unSubscribe("/qos0");
-  });
-
-  mqtt.onSubscribe([](int sub_id) {
-    Serial.printf("Subscribe topic id: %d ok\r\n", sub_id);
-    mqtt.publish("/qos0", "qos0", 0, 0);
-  });
-  mqtt.onConnect([]() {
-    Serial.printf("MQTT: Connected\r\n");
-//    Serial.printf("Subscribe id: %d\r\n", mqtt.subscribe("/qos0", 0));
-//    mqtt.subscribe("/qos1", 1);
-//    mqtt.subscribe("/qos2", 2);
-  });
-
-  mqtt.begin("mqtt://192.168.1.199:1883");
-//  mqtt.begin("mqtt://test.mosquitto.org:1883", {.lwtTopic = "hello", .lwtMsg = "offline", .lwtQos = 0, .lwtRetain = 0});
-//  mqtt.begin("mqtt://user:pass@mosquito.org:1883");
-//  mqtt.begin("mqtt://user:pass@mosquito.org:1883#clientId");
-
-}
 enum MODE {OFF=0, ON=1, TOGGLE=2};
 int light_on = OFF;
 
@@ -184,7 +157,7 @@ void lights(int mode)
   Serial.print(topic);
   Serial.print(" ");
   Serial.println(light_on);
-  mqtt.publish(topic, String(light_on), 0, 1);
+  mqtt.publish(topic, String(light_on));
   digitalWrite(LIGHT_PIN, light_on);
 }
 
@@ -315,7 +288,7 @@ void setup() {
   MDNS.addService("http", "tcp", 80);
   pinMode(LED_BLINK, OUTPUT);
 
-  startmqtt();
+  mqtt.start(tmp);
 }
 
 void stats_page()
@@ -489,7 +462,7 @@ void loop() {
   http_server.handleClient();
   handleOnOff();
   blinkLED();
-  mqtt.handle();
+  mqtt.poll();
 }
 
 
