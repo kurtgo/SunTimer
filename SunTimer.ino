@@ -54,7 +54,7 @@ public:
 SystemLog MySerial;
 #endif
 
-#define VERSION "0.17"
+#define VERSION "0.18"
 #define LED_BLINK led_pin
 
 #define ESP_1_ONBOARD_LED 1
@@ -139,18 +139,18 @@ void Syslog(String msgtosend)
 void startmqtt()
 {
     //topic, data, data is continuing
-//  mqtt.onData([](String topic, String data, bool cont) {
-//    Serial.printf("Data received, topic: %s, data: %s\r\n", topic.c_str(), data.c_str());
-//    mqtt.unSubscribe("/qos0");
-//  });
+  mqtt.onData([](String topic, String data, bool cont) {
+    Serial.printf("Data received, topic: %s, data: %s\r\n", topic.c_str(), data.c_str());
+    mqtt.unSubscribe("/qos0");
+  });
 
-//  mqtt.onSubscribe([](int sub_id) {
-//    Serial.printf("Subscribe topic id: %d ok\r\n", sub_id);
-//    mqtt.publish("/qos0", "qos0", 0, 0);
-//  });
+  mqtt.onSubscribe([](int sub_id) {
+    Serial.printf("Subscribe topic id: %d ok\r\n", sub_id);
+    mqtt.publish("/qos0", "qos0", 0, 0);
+  });
   mqtt.onConnect([]() {
     Serial.printf("MQTT: Connected\r\n");
-    Serial.printf("Subscribe id: %d\r\n", mqtt.subscribe("/qos0", 0));
+//    Serial.printf("Subscribe id: %d\r\n", mqtt.subscribe("/qos0", 0));
 //    mqtt.subscribe("/qos1", 1);
 //    mqtt.subscribe("/qos2", 2);
   });
@@ -465,7 +465,7 @@ unsigned blink_period=1000;
 
   static unsigned long led_last_poll = 0;
   static unsigned led_state = 0;
-  static unsigned states[] = {1000,500, 500, 500};
+  static unsigned states[] = {2000,250, 250, 250};
 
 void blinkLED()
 {
@@ -479,14 +479,13 @@ void blinkLED()
 
   if ((now - led_last_poll) > blinkevery) {
     ++led_state;
-    digitalWrite(LED_BLINK, led_state%2?HIGH:LOW);
+    digitalWrite(LED_BLINK, led_state%2?LOW:HIGH);
     led_last_poll = now;
   }
 }
 
 void loop() {
   ArduinoOTA.handle();
-  //timeClient.update();
   http_server.handleClient();
   handleOnOff();
   blinkLED();
