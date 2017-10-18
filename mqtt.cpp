@@ -1,43 +1,56 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#define LOG MySerial.println
 #include "mqtt.h"
-#include <ESP8266MQTTClient.h>
 
-MQTTClient tmqtt;
+#include <PubSubClient.h>
 
-void MqttPublish::start(String server_name)
+WiFiClient wfc;
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  // handle message arrived
+}
+PubSubClient client(wfc);
+
+void MqttPublish::start(IPAddress ip, uint16_t port,  String server_name)
 {
-    //topic, data, data is continuing
-  tmqtt.onData([](String topic, String data, bool cont) {
-    Serial.printf("Data received, topic: %s, data: %s\r\n", topic.c_str(), data.c_str());
-    tmqtt.unSubscribe("/qos0");
-  });
-
-  tmqtt.onSubscribe([](int sub_id) {
-    Serial.printf("Subscribe topic id: %d ok\r\n", sub_id);
-    tmqtt.publish("/qos0", "qos0", 0, 0);
-  });
-  tmqtt.onConnect([]() {
-    Serial.printf("MQTT: Connected\r\n");
-    Serial.printf("Subscribe id: %d\r\n", tmqtt.subscribe("/qos0", 0));
-  });
-
-  tmqtt.begin("mqtt://192.168.1.199:1883");
-//  mqtt.begin("mqtt://test.mosquitto.org:1883", {.lwtTopic = "hello", .lwtMsg = "offline", .lwtQos = 0, .lwtRetain = 0});
-//  mqtt.begin("mqtt://user:pass@mosquito.org:1883");
-//  mqtt.begin("mqtt://user:pass@mosquito.org:1883#clientId");
-
+  client.setServer(ip, port);
+  clientId = server_name;
+  client.connect(server_name.c_str());
 }
 
+void MqttPublish::reconnect() {
+  // Loop until we're reconnected
+  if (!client.connected()) {
+    log.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect(clientId.c_str())) {
+      log.println("connected");
+      // Once connected, publish an announcement...
+      client.publish("outTopic", "hello world");
+      // ... and resubscribe
+      client.subscribe("inTopic");
+    } else {
+      log.print("failed, rc=");
+      log.print(client.state());
+      log.println(" try again in 5 seconds");
+    }
+  }
+}
+long lastMsg;
 void MqttPublish::poll()
 {
-  tmqtt.handle();
+  client.loop();
+  long now = millis();
+  if (now - lastMsg > 60000) {
+    lastMsg = now;
+    reconnect();    
+  }
 }
 
 void MqttPublish::publish(const String &name, const String &val)
 {
- 
-  //tmqtt.publish(name,val,0,0);
+  if (client.connected()) {
+    client.publish(name.c_str(), val.c_str());
+  }
 }
 

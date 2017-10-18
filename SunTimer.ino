@@ -1,3 +1,4 @@
+
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
@@ -7,6 +8,8 @@
 #define LOG MySerial.println
 #include "mqtt.h"
 #include <ESP8266WiFi.h>
+#include <Adafruit_MCP9808.h>
+
 
 #include <time.h>
 #include "filemgr.h"
@@ -14,12 +17,14 @@
 #define LOG Syslog
 #include "/kghome.h"
 
+
+#define VERSION "0.19"
+
 #ifndef ENABLE_PRINT
 // disable Serial output
 #define Serial MySerial
-MqttPublish mqtt;
 
-IPAddress syslogServer(192, 168, 1, 199);
+IPAddress syslogServer(192, 168, 1, 229);
 WiFiUDP udp;
 
 class SystemLog : public Print {
@@ -54,7 +59,7 @@ public:
 SystemLog MySerial;
 #endif
 
-#define VERSION "0.18"
+MqttPublish mqtt(MySerial);
 #define LED_BLINK led_pin
 
 #define ESP_1_ONBOARD_LED 1
@@ -288,7 +293,7 @@ void setup() {
   MDNS.addService("http", "tcp", 80);
   pinMode(LED_BLINK, OUTPUT);
 
-  mqtt.start(tmp);
+  mqtt.start(syslogServer, 1883, tmp);
 }
 
 void stats_page()

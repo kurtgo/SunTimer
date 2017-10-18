@@ -2,10 +2,15 @@
 
 
 class MqttPublish {
+protected:
+  Print& log;
+  void reconnect();
+  String clientId;
 public:
-	MqttPublish() {
+	MqttPublish(Print &debug) : log(debug) {
+    
 	}
-  void 	start(String hostname);
+  void 	start(IPAddress server, uint16_t port, String hostname);
 
 	void poll();
 
