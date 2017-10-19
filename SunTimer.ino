@@ -16,9 +16,11 @@
 #include "sunMoon.h"
 #define LOG Syslog
 #include "/kghome.h"
+// Create the MCP9808 temperature sensor object
+Adafruit_MCP9808 tempsensor = Adafruit_MCP9808();
 
 
-#define VERSION "0.19"
+#define VERSION "0.20"
 
 #ifndef ENABLE_PRINT
 // disable Serial output
@@ -113,9 +115,12 @@ public:
 ESP8266WebServer http_server(80);
 String webPage = "";
 String topic = "sensor/";
+String top_topic;
 unsigned long a=1;
 TimeEvent sunRise;
 TimeEvent sunSet;
+
+int have_temp = 0;
 
 #define LIGHT_PIN light_pin
 #define LIGHT_PIN_R4 12
@@ -159,7 +164,6 @@ void lights(int mode)
 
   }
   Serial.print("Publish ");
-  Serial.print(topic);
   Serial.print(" ");
   Serial.println(light_on);
   mqtt.publish(topic, String(light_on));
@@ -206,11 +210,15 @@ void setup() {
     led_pin = 2;
     break;
   case 0x152669:
+    have_temp = 1;
   case 0x007a5e: // adafruit ESP-12 Huzzah
     led_pin = 2;
+    light_pin = 12;
     break;
   case 0xc6e096: // adafruit ESP-12 Feather
     led_pin = 2;
+    light_pin=12;
+    have_temp=1;
     break;
   }
   if (id == LINKNODE_R4) light_pin = LIGHT_PIN_R4;
@@ -266,6 +274,7 @@ void setup() {
  
   ArduinoOTA.setHostname(tmp);
   topic += tmp;
+  top_topic = topic;
   topic += "/light";
   ArduinoOTA.begin();
   
@@ -293,6 +302,14 @@ void setup() {
   MDNS.addService("http", "tcp", 80);
   pinMode(LED_BLINK, OUTPUT);
 
+  if (have_temp) {
+    if (!tempsensor.begin()) {
+      Serial.println("Couldn't find MCP9808!");
+    } else {
+      Serial.println("Found MCP9808");
+      have_temp = 1;
+    }
+  }
   mqtt.start(syslogServer, 1883, tmp);
 }
 
@@ -433,6 +450,11 @@ void handleOnOff()
         sunSet.setEvent(set);
       }
       break;
+    }
+    if (have_temp) {
+      float c = tempsensor.readTempC();
+      float f = c * 9.0 / 5.0 + 32;
+      mqtt.publish(top_topic+"/temp", String(f));
     }
     last_poll = millis();
   }
