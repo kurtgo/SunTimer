@@ -20,11 +20,18 @@ AbstractTemp::TempDevice temp_dev = AbstractTemp::type_notemp;
 #ifdef TFT
 #include <Adafruit_ILI9341.h>
 #endif
+#define OLED_MOSI   D7 //Connect to D1 on OLED
+#define OLED_CLK    D5 //Connect to D0 on OLED
+#define OLED_DC     D0 //Connect to DC on OLED
+#define OLED_CS     D8 //Connect to CS on OLED
+#define OLED_RESET  D3 //Connect to RES on OLED
+
 Adafruit_SSD1306 *oled = NULL;
 unsigned long deepSleep = 0xffffffff; // long time to deep sleep
 #include <time.h>
 #include "filemgr.h"
 #include "sunMoon.h"
+#undef LOG
 #define LOG Syslog
 #include "/kghome.h"
 
@@ -273,33 +280,41 @@ void setup() {
 		light_pin = LIGHT_PIN_R4;
 		led_pin = 2;
 		break;
-  case 0x4e4dc3:
-      oled = new Adafruit_SSD1306(0);
-      oled->begin(SSD1306_SWITCHCAPVCC,0x3d,false);  // Switch OLED
-      
-      oled->display();
-      temp_dev = AbstractTemp::type_si7021;
-      light_pin = 0;
-      led_pin=2;
-      break;
-  case 0x4e4f7a:
-  case 0x4e4c92:
-  case 0x4e4991:
-    temp_dev = AbstractTemp::type_si7021;
-    light_pin = 0;
-  case 0x4e4a36: // wemos;
-  case 0x4e49e1:
-  case 0x4e4ea6:
-  case 0x4e49dd:
-  case 0x4e4dda:
-  case 0x4e4c9b:
-    led_pin=2;    
-    break;
-  case 0x5a7d95: // nodemcu bare board
-    led_pin=2;    
-    break;
+	case 0x4e4ea6:
+		oled = new Adafruit_SSD1306(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
+		oled->begin(SSD1306_SWITCHCAPVCC);  // Switch OLED
+		oled->display();
+		temp_dev = AbstractTemp::type_si7021;
+		//light_pin = 4;
+		led_pin=2;
+		break;
+
+	case 0x4e4dc3:
+		oled = new Adafruit_SSD1306(0);
+		oled->begin(SSD1306_SWITCHCAPVCC,0x3d,false);  // Switch OLED
+
+		oled->display();
+		temp_dev = AbstractTemp::type_si7021;
+		light_pin = 0;
+		led_pin=2;
+		break;
+	case 0x4e4f7a:
+	case 0x4e4c92:
+	case 0x4e4991:
+		temp_dev = AbstractTemp::type_si7021;
+		light_pin = 0;
+	case 0x4e4a36: // wemos;
+	case 0x4e49e1:
+	case 0x4e49dd:
+	case 0x4e4dda:
+	case 0x4e4c9b:
+		led_pin=2;
+		break;
+	case 0x5a7d95: // nodemcu bare board
+		led_pin=2;
+		break;
 	case 0x152669:
-	    temp_dev = AbstractTemp::type_MCP9808;
+		temp_dev = AbstractTemp::type_MCP9808;
 
 #ifdef TFT
 		tft = new Adafruit_ILI9341(TFT_CS, TFT_DC);
@@ -308,21 +323,21 @@ void setup() {
 		display = new TM1638(14,12, 13);
 #endif
 		{
-      int oled_reset_pin = 4;
+			int oled_reset_pin = 4;
 			oled = new Adafruit_SSD1306(0);
 			oled->begin(0, 0x3d,false);  // Switch OLED
-      oled->display();
+			oled->display();
 		}
-   led_pin=2;
-   light_pin=0;
-   break;
-   
+		led_pin=2;
+		light_pin=0;
+		break;
+
 	case 0x007a5e: // adafruit ESP-12 Huzzah breakout
 		led_pin = 2;
 		light_pin = 0;
 		break;
 
-	case 0xc6e096: // adafruit ESP-12 Feather
+		/*	case 0xc6e096: // adafruit ESP-12 Feather
 		led_pin = 2;
 		light_pin=14;
 	    temp_dev = AbstractTemp::type_MCP9808;
@@ -330,10 +345,11 @@ void setup() {
 		break;
 	case 0xf569ca: // Olimex-EVB (not drivewaytimer)
 		break;
+		 */
 	case 0xf56977: // Olimex evb
 	case 0x8e2c8c: // Olimex evb
 		//deepSleep=1;
-	    temp_dev = AbstractTemp::type_DHT11;
+		temp_dev = AbstractTemp::type_DHT11;
 		break;
 	}
 	if (id == LINKNODE_R4) light_pin = LIGHT_PIN_R4;
@@ -660,27 +676,31 @@ void handleOnOff()
 #endif
 #if defined(LED_DISP) || defined(TFT)
 				display->setDisplayToString(String(f)+"F");
-				if (oled) {
-          struct tm *lt;
-          localtime(now, &lt);
-					// Clear the buffer.
-					oled->clearDisplay();
-					oled->setTextSize(1);
-					oled->setTextColor(WHITE);
-					oled->setCursor(20,0);
-					oled->print("Temp:");
-					oled->setTextSize(2);
-					oled->print(String(f)+"F");
-          /*oled->setCursor(25,0);
-          oled->print("time:");
-          oled->setTextSize(2);
-          oled->print(String(lt.tm_hour)+":"+String(lt.tm_min));
-          */
-					oled->display();
-
-				}
-       #endif
+#endif
 			}
+			if (oled) {
+				struct tm *lt;
+				char tmp[30];
+
+				lt = localtime(&now);
+				// Clear the buffer.
+				oled->clearDisplay();
+				oled->setTextSize(1);
+				oled->setTextColor(WHITE);
+				oled->setCursor(20,0);
+				oled->print("Temp:");
+				oled->setTextSize(2);
+				oled->println(String(f)+"F");
+				// oled->setCursor(25,0);
+				oled->print("time:");
+				oled->setTextSize(2);
+				sprintf(tmp, "%d:%02d", lt->tm_hour, lt->tm_min);
+				oled->print(tmp);
+
+				oled->display();
+
+			}
+
 		}
 		last_poll = millis();
 
