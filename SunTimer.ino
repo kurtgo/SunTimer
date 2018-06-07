@@ -13,9 +13,12 @@
 #include <Adafruit_SSD1306.h>
 #include "temp.h"
 #include <Wire.h>
+#include <TempControl.h>
 
 AbstractTemp *atemp;
 AbstractTemp::TempDevice temp_dev = AbstractTemp::type_notemp;
+
+TempControl *tempcontrol;
 
 #ifdef TFT
 #include <Adafruit_ILI9341.h>
@@ -34,6 +37,9 @@ unsigned long deepSleep = 0xffffffff; // long time to deep sleep
 #undef LOG
 #define LOG Syslog
 #include "/kghome.h"
+
+char *subscribe=NULL;
+
 
 int updateing = 0;
 #ifdef TFT
@@ -260,12 +266,49 @@ int getHour()
 	return localtime(&t)->tm_hour;
 
 }
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+	char txt[60];
+	char *cur = txt;
+	float temp;
+
+	sprintf(txt, "Message arrived [%s] ",topic);
+	Syslog(txt);
+
+	sprintf(txt, "payload: %.*s", length, payload);
+	Syslog(txt);
+	memcpy(txt,payload,length);
+	txt[length] = 0;
+	temp = atof(txt);
+	cur = subscribe;
+	int i=0;
+	while (*cur) {
+		if (strcmp(cur, topic) == 0) break;
+		++i;
+		cur += strlen(cur)+1;
+	}
+	if (tempcontrol) {
+		switch(i) {
+		case 0:
+			Syslog("updateTemp");
+			tempcontrol->updateTemp(temp, 0);
+			break;
+		case 1:
+			Syslog("setTemp");
+			tempcontrol->setTemp(temp);
+			break;
+		}
+	    double state = tempcontrol->getstate();
+		mqtt.publish(top_topic+"/hvac", String(state));
+	    double slope = tempcontrol->getSlope();
+		mqtt.publish(top_topic+"/slope", String(slope));
+	}
+}
+
 #define TFT_CS 15
 #define TFT_DC 2
 unsigned blink_now = 1000;
 
 void setup() {
-
 	int id = ESP.getChipId();
 
 	switch(id) {
@@ -304,11 +347,18 @@ void setup() {
 		temp_dev = AbstractTemp::type_si7021;
 		light_pin = 0;
 	case 0x4e4a36: // wemos;
-	case 0x4e49e1:
 	case 0x4e49dd:
 	case 0x4e4dda:
 	case 0x4e4c9b:
 		led_pin=2;
+		break;
+	case 0x4e49e1:
+		// wemos mini d1 w/ir
+		led_pin=2;
+		tempcontrol = new TempControl(MySerial, D0);
+		tempcontrol->setTemp(80);
+
+		subscribe = "sensor/suntimer23-4e4ea6/temp\0sensor/adafruit/set_temp\0";
 		break;
 	case 0x5a7d95: // nodemcu bare board
 		led_pin=2;
@@ -439,9 +489,9 @@ void setup() {
 	MDNS.addService("http", "tcp", 80);
 	pinMode(LED_BLINK, OUTPUT);
 
-  Serial.println("HTTP server started");
-  atemp = new AbstractTemp(temp_dev);
-  atemp->begin(Serial);
+	Serial.println("HTTP server started");
+	atemp = new AbstractTemp(temp_dev);
+	atemp->begin(Serial);
 
 	if (display) {
 #ifdef TFT
@@ -455,41 +505,50 @@ void setup() {
 		Serial.println("ID: " + String(id,HEX));
 	}
 	mqtt.start(syslogServer, 1883, tmp);
+	if (subscribe) {
+		char *cur = subscribe;
+		mqtt.setcallback(mqtt_callback);
+		do {
+			mqtt.subscribe(cur);
+			Syslog(String("Subscribe: ")+ cur);
+			cur += strlen(cur)+1;
+		} while (*cur);
+	}
 
-  int nDevices = 0;
-  int address;
-  int error;
-  for(address = 1; address < 127; address++ )
-  {
-    // The i2c_scanner uses the return value of
-    // the Write.endTransmisstion to see if
-    // a device did acknowledge to the address.
-    Wire.beginTransmission(address);
-    error = Wire.endTransmission();
- 
-    if (error == 0)
-    {
-      Serial.print("I2C device found at address 0x");
-      if (address<16)
-        Serial.print("0");
-      Serial.print(address,HEX);
-      Serial.println("  !");
- 
-      nDevices++;
-    }
-    else if (error==4)
-    {
-      Serial.print("Unknown error at address 0x");
-      if (address<16)
-        Serial.print("0");
-      Serial.println(address,HEX);
-    }    
-  }
-  if (nDevices == 0)
-    Serial.println("No I2C devices found\n");
-  else
-    Serial.println("done\n");
- 
+	int nDevices = 0;
+	int address;
+	int error;
+	for(address = 1; address < 127; address++ )
+	{
+		// The i2c_scanner uses the return value of
+		// the Write.endTransmisstion to see if
+		// a device did acknowledge to the address.
+		Wire.beginTransmission(address);
+		error = Wire.endTransmission();
+
+		if (error == 0)
+		{
+			Serial.print("I2C device found at address 0x");
+			if (address<16)
+				Serial.print("0");
+			Serial.print(address,HEX);
+			Serial.println("  !");
+
+			nDevices++;
+		}
+		else if (error==4)
+		{
+			Serial.print("Unknown error at address 0x");
+			if (address<16)
+				Serial.print("0");
+			Serial.println(address,HEX);
+		}
+	}
+	if (nDevices == 0)
+		Serial.println("No I2C devices found\n");
+	else
+		Serial.println("done\n");
+
 
 }
 
@@ -657,12 +716,6 @@ void handleOnOff()
 			}
 			break;
 		}
-		if (atemp->haveHumidity()) {
-			float h = atemp->GetHumidity();
-			mqtt.publish(top_topic+"/humidity", String(h));
-			Serial.println("Humidity: " + String(h));
-
-		}
 		if (atemp->haveTemp()) {
 			float f = atemp->GetTemp();
 			mqtt.publish(top_topic+"/temp", String(f));
@@ -687,21 +740,36 @@ void handleOnOff()
 				oled->clearDisplay();
 				oled->setTextSize(1);
 				oled->setTextColor(WHITE);
-				oled->setCursor(20,0);
+				oled->setCursor(0,0);
 				oled->print("Temp:");
 				oled->setTextSize(2);
 				oled->println(String(f)+"F");
-				// oled->setCursor(25,0);
-				oled->print("time:");
+				oled->setTextSize(1);
+				oled->print("Time:");
 				oled->setTextSize(2);
 				sprintf(tmp, "%d:%02d", lt->tm_hour, lt->tm_min);
-				oled->print(tmp);
+				oled->println(tmp);
 
-				oled->display();
 
 			}
 
 		}
+		if (atemp->haveHumidity()) {
+			float h = atemp->GetHumidity();
+			mqtt.publish(top_topic+"/humidity", String(h));
+			Serial.println("Humidity: " + String(h));
+			if (oled) {
+				char tmp[30];
+				oled->setTextSize(1);
+				oled->print("Humi:");
+				oled->setTextSize(2);
+				sprintf(tmp, "%f", h);
+				oled->println(tmp);
+			}
+		}
+		if (oled)
+			oled->display();
+
 		last_poll = millis();
 
 		if (deepSleep--==0) {

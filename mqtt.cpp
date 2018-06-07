@@ -6,9 +6,6 @@
 
 WiFiClient wfc;
 
-void callback(char* topic, byte* payload, unsigned int length) {
-  // handle message arrived
-}
 PubSubClient client(wfc);
 
 void MqttPublish::start(IPAddress ip, uint16_t port,  String server_name)
@@ -25,10 +22,8 @@ void MqttPublish::reconnect() {
     // Attempt to connect
     if (client.connect(clientId.c_str())) {
       log.println("connected");
-      // Once connected, publish an announcement...
-      client.publish("outTopic", "hello world");
-      // ... and resubscribe
-      client.subscribe("inTopic");
+      for (int i=0;i<sub.size();++i)
+    	  client.subscribe(sub[i].c_str());
     } else {
       log.print("failed, rc=");
       log.print(client.state());
@@ -53,4 +48,13 @@ void MqttPublish::publish(const String &name, const String &val)
     client.publish(name.c_str(), val.c_str());
   }
 }
+void MqttPublish::setcallback(MQTT_CALLBACK_SIGNATURE)
+{
+	client.setCallback(callback);
+}
 
+void MqttPublish::subscribe(const String &name)
+{
+	sub.push_back(name);
+  client.subscribe(name.c_str());
+}
