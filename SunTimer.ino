@@ -23,11 +23,15 @@ TempControl *tempcontrol;
 #ifdef TFT
 #include <Adafruit_ILI9341.h>
 #endif
+
+#ifdef ARDUINO_ESP8266_WEMOS_D1MINI
+
 #define OLED_MOSI   D7 //Connect to D1 on OLED
 #define OLED_CLK    D5 //Connect to D0 on OLED
 #define OLED_DC     D0 //Connect to DC on OLED
 #define OLED_CS     D8 //Connect to CS on OLED
 #define OLED_RESET  D3 //Connect to RES on OLED
+#endif
 
 Adafruit_SSD1306 *oled = NULL;
 unsigned long deepSleep = 0xffffffff; // long time to deep sleep
@@ -323,6 +327,8 @@ void setup() {
 		light_pin = LIGHT_PIN_R4;
 		led_pin = 2;
 		break;
+#ifdef ARDUINO_ESP8266_WEMOS_D1MINI
+
 	case 0x4e4ea6:
 		oled = new Adafruit_SSD1306(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 		oled->begin(SSD1306_SWITCHCAPVCC);  // Switch OLED
@@ -331,6 +337,15 @@ void setup() {
 		//light_pin = 4;
 		led_pin=2;
 		break;
+  case 0x4e49e1:
+    // wemos mini d1 w/ir
+    led_pin=2;
+    tempcontrol = new TempControl(MySerial, D0);
+    tempcontrol->setTemp(80);
+    subscribe = "sensor/suntimer23-4e4c92/temp\0sensor/adafruit/set_temp\0";
+    //subscribe = "sensor/suntimer23-4e4ea6/temp\0sensor/adafruit/set_temp\0";
+    break;
+#endif
 
 	case 0x4e4dc3:
 		oled = new Adafruit_SSD1306(0);
@@ -351,14 +366,6 @@ void setup() {
 	case 0x4e4dda:
 	case 0x4e4c9b:
 		led_pin=2;
-		break;
-	case 0x4e49e1:
-		// wemos mini d1 w/ir
-		led_pin=2;
-		tempcontrol = new TempControl(MySerial, D0);
-		tempcontrol->setTemp(80);
-
-		subscribe = "sensor/suntimer23-4e4ea6/temp\0sensor/adafruit/set_temp\0";
 		break;
 	case 0x5a7d95: // nodemcu bare board
 		led_pin=2;
@@ -382,6 +389,11 @@ void setup() {
 		light_pin=0;
 		break;
 
+  case 0xf0a449: // adafruit ESP-12 Huzzah
+    led_pin=2;
+    light_pin = 0;
+    break;
+    
 	case 0x007a5e: // adafruit ESP-12 Huzzah breakout
 		led_pin = 2;
 		light_pin = 0;
@@ -396,6 +408,8 @@ void setup() {
 	case 0xf569ca: // Olimex-EVB (not drivewaytimer)
 		break;
 		 */
+  //case 0xf569ca: // Olimex-EVB (not drivewaytimer)
+  //  break;
 	case 0xf56977: // Olimex evb
 	case 0x8e2c8c: // Olimex evb
 		//deepSleep=1;
