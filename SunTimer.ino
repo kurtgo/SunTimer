@@ -13,12 +13,18 @@
 #include <Adafruit_SSD1306.h>
 #include "temp.h"
 #include <Wire.h>
+#ifdef ARDUINO_ESP8266_WEMOS_D1MINI
+#define TEMP
+#endif
+#ifdef TEMP
 #include <TempControl.h>
+TempControl *tempcontrol = NULL;
+#endif
 
 AbstractTemp *atemp;
 AbstractTemp::TempDevice temp_dev = AbstractTemp::type_notemp;
 
-TempControl *tempcontrol;
+time_t uptime = 0;
 
 #ifdef TFT
 #include <Adafruit_ILI9341.h>
@@ -62,7 +68,7 @@ void *display = NULL;
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
 #endif
 
-#define VERSION "0.23"
+#define VERSION "0.24"
 const char* defname = "suntimer23-%06x";
 
 IPAddress syslogServer(192, 168, 1, 229);
@@ -290,6 +296,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 		++i;
 		cur += strlen(cur)+1;
 	}
+ #ifdef TEMP
 	if (tempcontrol) {
 		switch(i) {
 		case 0:
@@ -306,6 +313,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 	    double slope = tempcontrol->getSlope();
 		mqtt.publish(top_topic+"/slope", String(slope));
 	}
+ #endif
 }
 
 #define TFT_CS 15
@@ -325,6 +333,7 @@ void setup() {
 
 	case LINKNODE_R4:
 		light_pin = LIGHT_PIN_R4;
+    defname="drivewaytimer";
 		led_pin = 2;
 		break;
 #ifdef ARDUINO_ESP8266_WEMOS_D1MINI
@@ -342,7 +351,7 @@ void setup() {
     led_pin=2;
     tempcontrol = new TempControl(MySerial, D0);
     tempcontrol->setTemp(80);
-    subscribe = "sensor/suntimer23-4e4c92/temp\0sensor/adafruit/set_temp\0";
+    subscribe = "sensor/suntimer23-4e4dc3/temp\0sensor/adafruit/set_temp\0";
     //subscribe = "sensor/suntimer23-4e4ea6/temp\0sensor/adafruit/set_temp\0";
     break;
 #endif
@@ -415,6 +424,14 @@ void setup() {
 		//deepSleep=1;
 		temp_dev = AbstractTemp::type_DHT11;
 		break;
+  // sonoff device (ESP8285)
+  case 0xe45a8f:
+  case 0xe4f027:
+  case 0xd3e7f0:
+     light_pin=12;
+     led_pin=13;
+     subscribe = "sensor/adafruit/setSwitch\0";
+     break;
 	}
 	if (id == LINKNODE_R4) light_pin = LIGHT_PIN_R4;
 
@@ -492,7 +509,6 @@ void setup() {
 		stats_page();
 	});
 	http_server.on("/", []() {
-		lights(OFF);
 		stats_page();
 	});
 
@@ -621,6 +637,18 @@ void stats_page()
 	page += "<tr><td>time</td><td>";
 	page += time(nullptr);
 	page += "</td></tr>";
+  page += "<tr><td>up-time</td><td>";
+  time_t diff;
+  int days;
+  int hours;
+  hours = (time(nullptr) - uptime)/3600;
+  days = hours/24;
+  hours %= 24;
+  page += days;
+  page += " days ";
+  page += hours;
+  page += " hours";
+  page += "</td></tr>";
 	page += "</table></br>";
 
 	if (light_on)
@@ -675,12 +703,15 @@ void handleOnOff()
 	int mode=OFF;
 	if ((millis() - last_poll) > POLL_MINUTE) {
 		time_t now = time(nullptr);
+    time_t uphrs = (now-uptime)/3600;
 
 		Syslog("poll");
 		switch(state) {
 		case STATE_WAIT_EPOCH:
 			if (time(nullptr) > MYEPOCH) {
 				state = STATE_HAVE_TIME;
+
+        if (uptime == 0) uptime = now;
 				time_t rise = nextTime(now, false);
 				time_t set = nextTime(now, true);
 				sunRise.setEvent(rise);
@@ -728,6 +759,9 @@ void handleOnOff()
 				time_t set = nextTime(now, true);
 				sunSet.setEvent(set);
 			}
+      mqtt.publish(top_topic+"/up", String(uphrs));
+      Serial.println("Up: " + String(uphrs));
+
 			break;
 		}
 		if (atemp->haveTemp()) {
@@ -770,6 +804,7 @@ void handleOnOff()
 		}
 		if (atemp->haveHumidity()) {
 			float h = atemp->GetHumidity();
+
 			mqtt.publish(top_topic+"/humidity", String(h));
 			Serial.println("Humidity: " + String(h));
 			if (oled) {
