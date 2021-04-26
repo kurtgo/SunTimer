@@ -1,8 +1,8 @@
 #include <math.h>
 #include <time.h>
-#include "sunMoon.h"
 #include <Arduino.h>
 #include "TimeLib.h"
+#include "sunMoon.h"
 
 //STANDARD CONSTANTS
 double pi = 3.1415926535;   // Pi
@@ -251,8 +251,8 @@ double SolarHeight(int tu,     // universal times (0,1,2,.....,23)
 	return result;
 }
 
-time_t suntime(time_t now, double lat, double lon, bool sunset, int tz) {
-	struct tm tm = *localtime(&now);
+time_t suntime(Print *log, time_t now, double lat, double lon, bool sunset, int tz) {
+	struct tm tm = *gmtime(&now);
 	int day = tm.tm_mday;
 	int month = tm.tm_mon;
 	int year = tm.tm_year + 1900;
@@ -261,16 +261,16 @@ time_t suntime(time_t now, double lat, double lon, bool sunset, int tz) {
 	double localT;
 
 	if (sunset) {
-		localT = CalculateSunsetLocalTime(day, month, year, rlong, rlat, tz);
+		localT = CalculateSunsetLocalTime(day, month, year, rlong, rlat, 0);
 	} else {
-		localT = CalclulateSunriseLocalTime(day, month, year, rlong, rlat, tz);
+		localT = CalclulateSunriseLocalTime(day, month, year, rlong, rlat, 0);
 
 	}
 
 	// t = gmtime of sunrise, so just get gmtime 0:0:0 and add this
 	// local time adjust
-	Serial.print("sun: ");
-	Serial.println(localT);
+	log->print("sun: ");
+	log->println(localT);
 
 	  tmElements_t tm2;
 	  breakTime(now, tm2);
@@ -284,7 +284,6 @@ time_t suntime(time_t now, double lat, double lon, bool sunset, int tz) {
 	tm2.Second = (int) localT;
 	time_t ret = makeTime(tm2);
 
-	Serial.println(ctime(&ret));
+	log->println(ctime(&ret));
 	return ret;
 }
-

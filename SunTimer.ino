@@ -1,7 +1,7 @@
 
 
 #include <Arduino.h>
-#ifdef OLD
+#ifdef ESP8266
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
@@ -29,6 +29,7 @@ TempControl *tempcontrol;
 AbstractTemp *atemp;
 AbstractTemp::TempDevice temp_dev = AbstractTemp::type_notemp;
 
+time_t uptime = 0;
 
 #ifdef TFT
 #include <Adafruit_ILI9341.h>
@@ -72,7 +73,7 @@ void *display = NULL;
 #endif
 
 
-#define VERSION "0.23"
+#define VERSION "0.25-esp32"
 const char* defname = "suntimer23-%06x";
 
 IPAddress syslogServer(192, 168, 1, 229);
@@ -220,6 +221,11 @@ void httpUpdate()
 enum MODE {OFF=0, ON=1, TOGGLE=2};
 int light_on = OFF;
 
+void lowpower()
+{
+  digitalWrite(LIGHT_PIN, OFF);
+  digitalWrite(33,OFF);
+}
 void lights(int mode)
 {
 	switch(mode) {
@@ -360,7 +366,7 @@ void setup() {
     light_pin = 32;
     pinMode(33, OUTPUT);
     digitalWrite(33, LOW);
-
+    defname="chickenbarn";
     break;
     
 	case 0xc6e096:
@@ -372,6 +378,7 @@ void setup() {
 
 	case LINKNODE_R4:
 		light_pin = LIGHT_PIN_R4;
+    defname="drivewaytimer";
 		led_pin = 2;
 		break;
 #ifdef ARDUINO_ESP8266_WEMOS_D1MINI
@@ -399,6 +406,7 @@ void setup() {
 		oled->begin(SSD1306_SWITCHCAPVCC,0x3d,false);  // Switch OLED
 
 		oled->display();
+		temp_dev = AbstractTemp::type_si7021;
 		light_pin = 0;
 		led_pin=2;
 		break;
@@ -461,6 +469,14 @@ void setup() {
 		//deepSleep=1;
 		temp_dev = AbstractTemp::type_DHT11;
 		break;
+  // sonoff device (ESP8285)
+  case 0xe45a8f:
+  case 0xe4f027:
+  case 0xd3e7f0:
+     light_pin=12;
+     led_pin=13;
+     subscribe = "sensor/adafruit/setSwitch\0";
+     break;
 	}
 	if (id == LINKNODE_R4) light_pin = LIGHT_PIN_R4;
 
@@ -481,12 +497,12 @@ void setup() {
 	}
 #endif
 
-	configTime(TIMEZONE * 3600, 0, "pool.ntp.org", "time.nist.gov");
+	configTime(TIMEZONE * 3600, 3600, "pool.ntp.org", "time.nist.gov");
 	//  timeClient.begin();
 
 	Syslog("SunTimer Ver:" VERSION " startup");
 
-// Port defaults to 8266
+	// Port defaults to 8266
 	// ArduinoOTA.setPort(8266);
 
 	// Hostname defaults to esp8266-[ChipID]
@@ -541,7 +557,6 @@ void setup() {
 		stats_page();
 	});
 	http_server.on("/", []() {
-		lights(OFF);
 		stats_page();
 	});
 
@@ -671,6 +686,18 @@ void stats_page()
 	page += "<tr><td>time</td><td>";
 	page += time(nullptr);
 	page += "</td></tr>";
+  page += "<tr><td>up-time</td><td>";
+  time_t diff;
+  int days;
+  int hours;
+  hours = (time(nullptr) - uptime)/3600;
+  days = hours/24;
+  hours %= 24;
+  page += days;
+  page += " days ";
+  page += hours;
+  page += " hours";
+  page += "</td></tr>";
 	page += "</table></br>";
 
 	if (light_on)
@@ -714,7 +741,7 @@ time_t nextTime(time_t now, int sunset)
 	time_t cur = now-DAY;
 	time_t nxt;
 	do {
-		nxt = suntime(cur, LAT, LON, sunset, TIMEZONE);
+		nxt = suntime(&Serial, cur, LAT, LON, sunset, TIMEZONE);
 		cur += HOUR*8;
 	} while (nxt < now);
 	return nxt;
@@ -725,12 +752,16 @@ void handleOnOff()
 	int mode=OFF;
 	if ((millis() - last_poll) > POLL_MINUTE) {
 		time_t now = time(nullptr);
+    time_t uphrs = (now-uptime)/3600;
 
 		Syslog("poll");
+    lowpower();
 		switch(state) {
 		case STATE_WAIT_EPOCH:
 			if (time(nullptr) > MYEPOCH) {
 				state = STATE_HAVE_TIME;
+
+        if (uptime == 0) uptime = now;
 				time_t rise = nextTime(now, false);
 				time_t set = nextTime(now, true);
 				sunRise.setEvent(rise);
@@ -778,6 +809,9 @@ void handleOnOff()
 				time_t set = nextTime(now, true);
 				sunSet.setEvent(set);
 			}
+      mqtt.publish(top_topic+"/up", String(uphrs));
+      Serial.println("Up: " + String(uphrs));
+
 			break;
 		}
 #ifdef TEMP
@@ -821,6 +855,7 @@ void handleOnOff()
 		}
 		if (atemp->haveHumidity()) {
 			float h = atemp->GetHumidity();
+
 			mqtt.publish(top_topic+"/humidity", String(h));
 			Serial.println("Humidity: " + String(h));
 			if (oled) {
