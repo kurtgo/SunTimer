@@ -1,5 +1,9 @@
 #include <Arduino.h>
+#ifdef __ESP8266__
 #include <ESP8266WiFi.h>
+#else
+#include "WiFi.h"
+#endif
 #include "mqtt.h"
 
 #include <PubSubClient.h>

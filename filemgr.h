@@ -1,1 +1,2 @@
-	void filemgrSetup(ESP8266WebServer *s);
+
+	//void filemgrSetup(ESP8266_AT_WebServer *s);

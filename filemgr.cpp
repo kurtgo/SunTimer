@@ -1,8 +1,11 @@
+#ifdef __ESP8266__
+#include <SPIFFS.h>
+
 
 #include <ESP8266WiFi.h>
-#include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
+#include <WiFiClient.h>
 #include <FS.h>
 #include "filemgr.h"
 
@@ -10,7 +13,7 @@
 
 
 //class FileBrowser {
-	ESP8266WebServer *httpsvr = NULL;
+	ESP8266_AT_WebServer *httpsvr = NULL;
 	//holds the current upload
 	File fsUploadFile;
 
@@ -116,7 +119,7 @@
 
 		String path = httpsvr->arg("dir");
 		DBG_OUTPUT_PORT.println("handleFileList: " + path);
-		Dir dir = SPIFFS.openDir(path);
+		spiffs_DIR dir = SPIFFS.openDir(path);
 		path = String();
 
 		String output = "[";
@@ -143,7 +146,7 @@
 		DBG_OUTPUT_PORT.setDebugOutput(true);
 		SPIFFS.begin();
 		{
-			Dir dir = SPIFFS.openDir("/");
+			spiffs_DIR dir = SPIFFS.openDir("/");
 			while (dir.next()) {
 				String fileName = dir.fileName();
 				size_t fileSize = dir.fileSize();
@@ -190,3 +193,4 @@
 
 	}
 //};
+#endif

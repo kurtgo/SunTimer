@@ -1,24 +1,34 @@
 
 
 #include <Arduino.h>
+#ifdef OLD
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
 #include <ArduinoOTA.h>
-#define LOG MySerial.println
-#include "mqtt.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266httpUpdate.h>
+#else
+#include <WiFi.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#endif
+#define LOG MySerial.println
+#include "mqtt.h"
 //#include <ArducamSSD1306.h>
 #include <Adafruit_SSD1306.h>
 #include "temp.h"
 #include <Wire.h>
+#ifdef TEMP
 #include <TempControl.h>
+TempControl *tempcontrol;
+#endif
 
 AbstractTemp *atemp;
 AbstractTemp::TempDevice temp_dev = AbstractTemp::type_notemp;
 
-TempControl *tempcontrol;
 
 #ifdef TFT
 #include <Adafruit_ILI9341.h>
@@ -54,13 +64,13 @@ Adafruit_ILI9341 *display = NULL;
 #ifdef LEDDISP
 #include <TM1638.h>
 TM1638 *display = NULL;
+#if (SSD1306_LCDHEIGHT != 64)
+#error("Height incorrect, please fix Adafruit_SSD1306.h!");
+#endif
 #else
 void *display = NULL;
 #endif
 
-#if (SSD1306_LCDHEIGHT != 64)
-#error("Height incorrect, please fix Adafruit_SSD1306.h!");
-#endif
 
 #define VERSION "0.23"
 const char* defname = "suntimer23-%06x";
@@ -89,7 +99,7 @@ public:
 		while (size--) {
 			if (*buf == '\n' || left == 0) {
 				udp.beginPacket(syslogServer, 514);
-				udp.write(buffer, 1024-left);
+				udp.write((const uint8_t*)buffer, 1024-left);
 				udp.endPacket();
 				left = 1024;
 				last = buffer;
@@ -158,7 +168,7 @@ public:
 		return fire_time;
 	}
 };
-ESP8266WebServer http_server(80);
+WebServer http_server(80);
 String webPage = "";
 String topic = "sensor/";
 String top_topic;
@@ -189,6 +199,7 @@ void Syslog(String msgtosend)
 	free(p);
 }
 
+#ifdef update
 void httpUpdate()
 {
 	t_httpUpdate_return ret = ESPhttpUpdate.update("192.168.1.229", 80, "/SunTimer_update.php", VERSION);
@@ -205,6 +216,7 @@ void httpUpdate()
 
 	}
 }
+#endif
 enum MODE {OFF=0, ON=1, TOGGLE=2};
 int light_on = OFF;
 
@@ -229,6 +241,7 @@ void lights(int mode)
 	Serial.println(light_on);
 	mqtt.publish(topic, String(light_on));
 	digitalWrite(LIGHT_PIN, light_on);
+  digitalWrite(33,light_on==ON?OFF:ON);
 }
 
 class Alarm {
@@ -290,7 +303,8 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 		++i;
 		cur += strlen(cur)+1;
 	}
-	if (tempcontrol) {
+#ifdef TEMP
+if (tempcontrol) {
 		switch(i) {
 		case 0:
 			Syslog("updateTemp");
@@ -306,16 +320,49 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 	    double slope = tempcontrol->getSlope();
 		mqtt.publish(top_topic+"/slope", String(slope));
 	}
+#endif
 }
-
 #define TFT_CS 15
 #define TFT_DC 2
 unsigned blink_now = 1000;
 
 void setup() {
-	int id = ESP.getChipId();
+  #undef Serial
+  Serial.begin(115200);
+  Serial.print("v1.1 Connecting to station ");
+  Serial.println(ssid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
+  }
+  Serial.println("Ready");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+//#define Serial MySerial
 
+  #ifdef __ESP8266__
+  
+	int id = ESP.getChipId();
+#else
+ uint32_t id = 0;
+  for(int i=0; i<17; i=i+8) {
+    id |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
+  }
+
+ 
+#endif
 	switch(id) {
+  case 0x6a5444: // olimex esp32-evb
+    led_pin = 0;
+    light_pin = 32;
+    pinMode(33, OUTPUT);
+    digitalWrite(33, LOW);
+
+    break;
+    
 	case 0xc6e096:
 		// Adafruit feather with TFT featherwing
 		break;
@@ -352,7 +399,6 @@ void setup() {
 		oled->begin(SSD1306_SWITCHCAPVCC,0x3d,false);  // Switch OLED
 
 		oled->display();
-		temp_dev = AbstractTemp::type_si7021;
 		light_pin = 0;
 		led_pin=2;
 		break;
@@ -421,9 +467,11 @@ void setup() {
 	pinMode(LIGHT_PIN, OUTPUT);
 	digitalWrite(LIGHT_PIN, LOW);
 
+  #ifdef STOP
 	Serial.begin(115200);
 	Serial.print("v1.1 Connecting to station ");
 	Serial.println(ssid);
+// #ifdef STOP
 	WiFi.mode(WIFI_STA);
 	WiFi.begin(ssid, password);
 	while (WiFi.waitForConnectResult() != WL_CONNECTED) {
@@ -431,13 +479,14 @@ void setup() {
 		delay(5000);
 		ESP.restart();
 	}
+#endif
 
 	configTime(TIMEZONE * 3600, 0, "pool.ntp.org", "time.nist.gov");
 	//  timeClient.begin();
 
 	Syslog("SunTimer Ver:" VERSION " startup");
 
-	// Port defaults to 8266
+// Port defaults to 8266
 	// ArduinoOTA.setPort(8266);
 
 	// Hostname defaults to esp8266-[ChipID]
@@ -488,7 +537,7 @@ void setup() {
 		stats_page();
 	});
 	http_server.on("/update", []() {
-		httpUpdate();
+		//httpUpdate();
 		stats_page();
 	});
 	http_server.on("/", []() {
@@ -501,12 +550,14 @@ void setup() {
 	Serial.println("HTTP server started");
 	//udp.begin(514);
 	MDNS.addService("http", "tcp", 80);
-	pinMode(LED_BLINK, OUTPUT);
+	if (LED_BLINK)
+  	pinMode(LED_BLINK, OUTPUT);
 
 	Serial.println("HTTP server started");
-	atemp = new AbstractTemp(temp_dev);
+#ifdef TEMP
+  atemp = new AbstractTemp(temp_dev);
 	atemp->begin(Serial);
-
+#endif
 	if (display) {
 #ifdef TFT
 		Serial.println("TFT started 11");
@@ -562,7 +613,6 @@ void setup() {
 		Serial.println("No I2C devices found\n");
 	else
 		Serial.println("done\n");
-
 
 }
 
@@ -730,6 +780,7 @@ void handleOnOff()
 			}
 			break;
 		}
+#ifdef TEMP
 		if (atemp->haveTemp()) {
 			float f = atemp->GetTemp();
 			mqtt.publish(top_topic+"/temp", String(f));
@@ -781,6 +832,7 @@ void handleOnOff()
 				oled->println(tmp);
 			}
 		}
+#endif
 		if (oled)
 			oled->display();
 
@@ -818,7 +870,6 @@ void blinkLED()
 		led_last_poll = now;
 	}
 }
-
 void loop() {
 	ArduinoOTA.handle();
 	if (!updating) {
