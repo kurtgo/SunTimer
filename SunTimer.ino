@@ -9,7 +9,9 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266httpUpdate.h>
 #else
-#include <WiFi.h>
+#include <esp_sleep.h>
+#include <esp_wifi.h>
+//#include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
@@ -75,6 +77,8 @@ void *display = NULL;
 
 #define VERSION "0.25-esp32"
 const char* defname = "suntimer23-%06x";
+
+int sleep_enable = 0;
 
 IPAddress syslogServer(192, 168, 1, 229);
 WiFiUDP udp;
@@ -206,13 +210,13 @@ void httpUpdate()
 	t_httpUpdate_return ret = ESPhttpUpdate.update("192.168.1.229", 80, "/SunTimer_update.php", VERSION);
 	switch(ret) {
 	case HTTP_UPDATE_FAILED:
-		Serial.println("[update] Update failed.");
+		MySerial.println("[update] Update failed.");
 		break;
 	case HTTP_UPDATE_NO_UPDATES:
-		Serial.println("[update] Update no Update.");
+		MySerial.println("[update] Update no Update.");
 		break;
 	case HTTP_UPDATE_OK:
-		Serial.println("[update] Update ok."); // may not called we reboot the ESP
+		MySerial.println("[update] Update ok."); // may not called we reboot the ESP
 		break;
 
 	}
@@ -221,10 +225,27 @@ void httpUpdate()
 enum MODE {OFF=0, ON=1, TOGGLE=2};
 int light_on = OFF;
 
+time_t poweractive=0;
+time_t sleepactive=0;
+#define SLEEP_TIME 10
+#define WAKE_TIME 2
 void lowpower()
 {
-  digitalWrite(LIGHT_PIN, OFF);
-  digitalWrite(33,OFF);
+  time_t now;
+  now = time(nullptr);
+  if (now > poweractive) {
+    digitalWrite(LIGHT_PIN, OFF);
+    digitalWrite(33,OFF);
+    if (sleep_enable && now > sleepactive) {
+      // sleep for 10 minutes, awake for 2 mintes
+      sleepactive = time(nullptr) + ((SLEEP_TIME+WAKE_TIME) * 60);
+      esp_sleep_enable_timer_wakeup(60*SLEEP_TIME*1000*1000);
+      esp_wifi_stop();
+      esp_deep_sleep_start();
+      esp_wifi_start();
+      MySerial.println("Wakeup from sleep");
+    }      
+  }
 }
 void lights(int mode)
 {
@@ -242,12 +263,13 @@ void lights(int mode)
 			light_on = ON;
 
 	}
-	Serial.print("Publish ");
-	Serial.print(" ");
-	Serial.println(light_on);
+	MySerial.print("Publish ");
+	MySerial.print(" ");
+	MySerial.println(light_on);
 	mqtt.publish(topic, String(light_on));
 	digitalWrite(LIGHT_PIN, light_on);
   digitalWrite(33,light_on==ON?OFF:ON);
+  poweractive = time(nullptr) + 30;
 }
 
 class Alarm {
@@ -333,21 +355,6 @@ if (tempcontrol) {
 unsigned blink_now = 1000;
 
 void setup() {
-  #undef Serial
-  Serial.begin(115200);
-  Serial.print("v1.1 Connecting to station ");
-  Serial.println(ssid);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    Serial.println("Connection Failed! Rebooting...");
-    delay(5000);
-    ESP.restart();
-  }
-  Serial.println("Ready");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-//#define Serial MySerial
 
   #ifdef __ESP8266__
   
@@ -483,19 +490,25 @@ void setup() {
 	pinMode(LIGHT_PIN, OUTPUT);
 	digitalWrite(LIGHT_PIN, LOW);
 
-  #ifdef STOP
-	Serial.begin(115200);
-	Serial.print("v1.1 Connecting to station ");
-	Serial.println(ssid);
-// #ifdef STOP
-	WiFi.mode(WIFI_STA);
-	WiFi.begin(ssid, password);
-	while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-		Serial.println("Connection Failed! Rebooting...");
-		delay(5000);
-		ESP.restart();
-	}
-#endif
+  char tmp[30];
+  sprintf(tmp, defname, id);
+  ArduinoOTA.setHostname(tmp);
+  mdns_hostname_set(tmp);
+
+  Serial.begin(115200);
+  Serial.print("v1.1 Connecting to station ");
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
+  }
+  Serial.println("Ready");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
 	configTime(TIMEZONE * 3600, 3600, "pool.ntp.org", "time.nist.gov");
 	//  timeClient.begin();
@@ -512,29 +525,24 @@ void setup() {
 	// ArduinoOTA.setPassword((const char *)"123");
 
 	ArduinoOTA.onStart([]() {
-		Serial.println("Start");
+		MySerial.println("Start");
 		//lights(OFF);
 		updating = 1;
 	});
 	ArduinoOTA.onEnd([]() {
-		Serial.println("\nEnd");
+		MySerial.println("\nEnd");
 	});
 	ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-		Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+		MySerial.printf("Progress: %u%%\r", (progress / (total / 100)));
 	});
 	ArduinoOTA.onError([](ota_error_t error) {
-		Serial.printf("Error[%u]: ", error);
-		if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-		else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-		else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-		else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-		else if (error == OTA_END_ERROR) Serial.println("End Failed");
+		MySerial.printf("Error[%u]: ", error);
+		if (error == OTA_AUTH_ERROR) MySerial.println("Auth Failed");
+		else if (error == OTA_BEGIN_ERROR) MySerial.println("Begin Failed");
+		else if (error == OTA_CONNECT_ERROR) MySerial.println("Connect Failed");
+		else if (error == OTA_RECEIVE_ERROR) MySerial.println("Receive Failed");
+		else if (error == OTA_END_ERROR) MySerial.println("End Failed");
 	});
-	char tmp[30];
-
-	sprintf(tmp, defname, id);
-
-	ArduinoOTA.setHostname(tmp);
 	topic += tmp;
 	top_topic = topic;
 	topic += "/light";
@@ -556,33 +564,38 @@ void setup() {
 		//httpUpdate();
 		stats_page();
 	});
+  http_server.on("/sleep", []() {
+    //httpUpdate();
+    sleep_enable ^= 1;
+    stats_page();
+  });
 	http_server.on("/", []() {
 		stats_page();
 	});
 
 	//filemgrSetup(&http_server);
 	http_server.begin();
-	Serial.println("HTTP server started");
+	MySerial.println("HTTP server started");
 	//udp.begin(514);
 	MDNS.addService("http", "tcp", 80);
 	if (LED_BLINK)
   	pinMode(LED_BLINK, OUTPUT);
 
-	Serial.println("HTTP server started");
+	MySerial.println("HTTP server started");
 #ifdef TEMP
   atemp = new AbstractTemp(temp_dev);
 	atemp->begin(Serial);
 #endif
 	if (display) {
 #ifdef TFT
-		Serial.println("TFT started 11");
+		MySerial.println("TFT started 11");
 		tft->begin();
-		Serial.println("TFT started 22");
+		MySerial.println("TFT started 22");
 
 		tft->fillScreen(ILI9341_BLUE);
 #endif
 	} else {
-		Serial.println("ID: " + String(id,HEX));
+		MySerial.println("ID: " + String(id,HEX));
 	}
 	mqtt.start(syslogServer, 1883, tmp);
 	if (subscribe) {
@@ -608,26 +621,26 @@ void setup() {
 
 		if (error == 0)
 		{
-			Serial.print("I2C device found at address 0x");
+			MySerial.print("I2C device found at address 0x");
 			if (address<16)
-				Serial.print("0");
-			Serial.print(address,HEX);
-			Serial.println("  !");
+				MySerial.print("0");
+			MySerial.print(address,HEX);
+			MySerial.println("  !");
 
 			nDevices++;
 		}
 		else if (error==4)
 		{
-			Serial.print("Unknown error at address 0x");
+			MySerial.print("Unknown error at address 0x");
 			if (address<16)
-				Serial.print("0");
-			Serial.println(address,HEX);
+				MySerial.print("0");
+			MySerial.println(address,HEX);
 		}
 	}
 	if (nDevices == 0)
-		Serial.println("No I2C devices found\n");
+		MySerial.println("No I2C devices found\n");
 	else
-		Serial.println("done\n");
+		MySerial.println("done\n");
 
 }
 
@@ -677,6 +690,9 @@ void stats_page()
 	page += "<tr><td>poll</td><td>";
 	page += millis()-last_poll;
 	page += "</td></tr>";
+  page += "<tr><td>sleep</td><td>";
+  page += sleep_enable;
+  page += "</td></tr>";
 	page += "<tr><td>light_on</td><td>";
 	page += light_on;
 	page += "</td></tr>";
@@ -705,7 +721,7 @@ void stats_page()
 	else
 		page += "<input type=button value='Light On' onmousedown=location.href='/light_on'><br/>";
 	page += "<input type=button value='Refresh' onmousedown=location.href='/'><br/>";
-	page += "<input type=button value='Identify' onmousedown=location.href='/identify'><br/>";
+  page += "<input type=button value='sleep' onmousedown=location.href='/sleep'><br/>";
 
 	page += "</body></html>";
 	http_server.send(200, "text/html", page);
@@ -810,7 +826,7 @@ void handleOnOff()
 				sunSet.setEvent(set);
 			}
       mqtt.publish(top_topic+"/up", String(uphrs));
-      Serial.println("Up: " + String(uphrs));
+      MySerial.println("Up: " + String(uphrs));
 
 			break;
 		}
@@ -818,7 +834,7 @@ void handleOnOff()
 		if (atemp->haveTemp()) {
 			float f = atemp->GetTemp();
 			mqtt.publish(top_topic+"/temp", String(f));
-			Serial.println("Temp: " + String(f) + "F");
+			MySerial.println("Temp: " + String(f) + "F");
 			if (display) {
 #ifdef TFT
 				tft->setCursor(0,0);
@@ -857,7 +873,7 @@ void handleOnOff()
 			float h = atemp->GetHumidity();
 
 			mqtt.publish(top_topic+"/humidity", String(h));
-			Serial.println("Humidity: " + String(h));
+			MySerial.println("Humidity: " + String(h));
 			if (oled) {
 				char tmp[30];
 				oled->setTextSize(1);
