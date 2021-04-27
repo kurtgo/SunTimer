@@ -86,7 +86,7 @@ WiFiUDP udp;
 #ifndef ENABLE_PRINT
 // disable Serial output
 
-#define Serial MySerial
+//#define Serial MySerial
 
 class SystemLog : public Print {
 protected:
